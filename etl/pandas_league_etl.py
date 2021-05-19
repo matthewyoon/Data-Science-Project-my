@@ -1,9 +1,10 @@
 import pandas as pd
 import pandas as pd
 import datetime as dt
-from pandas import json_normalize
+from pandas import json_normalize, Series
 from riotwatcher import LolWatcher, ApiError
 from datetime import timedelta
+from sqlalchemy.sql.sqltypes import Float
 from sqlalchemy.types import Integer, Text, DateTime
 from dotenv import load_dotenv
 
@@ -26,6 +27,15 @@ class Pandas_ETL():
         summoner = self.lol_watcher.summoner.by_name(self.my_region, username)
         summoner_df = pd.DataFrame([summoner])
         return summoner_df
+
+    def get_summonerRanks(self, name_df):
+        rank = pd.DataFrame()
+        for i in range(len(name_df)):
+            temp = pd.DataFrame(self.lol_watcher.league.by_summoner('na1', name_df['player.summonerId'][i]))
+            rank = rank.append(temp)
+        ranks = rank[['tier','rank']].copy()
+        ranks.reset_index(drop=True,inplace=True)
+        return ranks
 
     # Method to get the specific match ids of the requested username (these match id's are required to access the match portion of the API that houses users' statistics)
     def get_match_id(self, summoner_df, num_matches):
@@ -74,23 +84,32 @@ class Pandas_ETL():
         match_id = self.get_match_id(summoner_df, num_matches)
         stats_df = self.get_stats(match_id)
         name_df = self.get_summonerName(match_id)
+        # match_ranks_df = self.get_summonerRanks(name_df)
+        # name_df = name_df.join(match_ranks_df)
         temp_df = name_df.join(stats_df)
         # Will want to specify which columns I want 
         extracted_df = temp_df[['player.summonerName','player.summonerId','kills','deaths','assists','totalDamageDealtToChampions','visionScore','totalMinionsKilled']].copy()
+
         return extracted_df
 
     # This method is to calculate the actual kill/death ratio
     # Could have used a lambda function, but this method makes the purpose a little more clear imo.
     def kda(self, row):
         if row['deaths'] == 0:
-            return "no deaths"
+            return None
         else:
             return round(row['kills'] + row['assists'] / row['deaths'], 2)
     
-    # This transformation of the extracted dataframe will look similar to the end statistics page of a match, but it will have the cumulative data of the user
+    # This transformation will have the data from the number of matches the user inputs and add that to the database as a dataframe.
+    # In this example, user "Doublelift"'s most recent 5 matches will be taken into account.
     def transform(self, username, num_matches):
         extracted_df = self.extract(username, num_matches)
+        extracted_df = extracted_df.where(pd.notnull(extracted_df), None)
+        # print(extracted_df)
         extracted_df = extracted_df.groupby(['player.summonerName'], as_index=False)[['kills','deaths','assists','totalDamageDealtToChampions','visionScore','totalMinionsKilled']].mean().round(2)
+        extracted_df_username = extracted_df.loc[extracted_df['player.summonerName']==username].copy()
+        print(extracted_df_username)
+        
 
         # Check if df is empty
         if extracted_df.empty:
@@ -98,7 +117,8 @@ class Pandas_ETL():
             return False
         
         # Primary Key Check
-        if pd.Series(extracted_df['player.summonerName']).is_unique:
+        
+        if pd.Index(extracted_df).is_unique:
             pass
         else:
             raise Exception(f'[Transform Error]: Primary Key Check is not valid')
@@ -107,117 +127,32 @@ class Pandas_ETL():
             raise Exception('No real Values Found')
 
         # Adding Transformation Column - Pop range Column
-        extracted_df['kill/death/assist ratio'] = extracted_df.apply(self.kda, axis=1)
+        extracted_df_username['kill/death/assist ratio'] = extracted_df_username.apply(self.kda, axis=1)
+        extracted_df_username['numMatchesInputted'] = num_matches
 
-        print(extracted_df)
-        return extracted_df
+        print(extracted_df_username.sort_values(['kill/death/assist ratio'], ascending=False))
+        return extracted_df_username
+
+    def load(self, username, num_matches): # similar to the other methods - will take in 2 params
+        df = self.transform(username, num_matches)
+        connection = 'postgresql://postgres:twdiplapo22@127.0.0.1:5432/recent_matches_kda_data'
+
+        df.to_sql('recent_artist_popularity', index=False, con = connection, if_exists = 'append',
+        schema = 'public', chunksize = 500, dtype={
+                                                    'player.summonerName': Text,
+                                                    'kills': Float,
+                                                    'deaths': Float,
+                                                    'assists': Float,
+                                                    'totalDamageDealtToChampions': Float,
+                                                    'visionScore': Float,
+                                                    'totalMinionsKilled': Float,
+                                                    'numMatchesInputted': Integer
+                                                })
+
+        return df
 
 etl=Pandas_ETL()
-final_df = etl.transform('Doublelift',10)
+final_df = etl.load('rickyyytan',5)
 
+#argparse
 
-
-
-
-# etl.get_summonerData(username='Doublelift')
-
-
-# SPOTIFY ETL EXAMPLE
-# class Pandas_ETL():
-#     CLIENT_ID = os.environ.get('SP_CLIENT_ID')
-#     CLIENT_SEC = os.environ.get('SP_CLIENT_SECRET')
-
-#     # Data Getting method
-#     def get_data(self):
-#         scope = 'user-library-read user-read-recently-played'
-
-#         today = datetime.datetime.now()
-#         past_90 = today - datetime.timedelta(days = 90)
-#         past_90_unix_timestamp = int(past_90.timestamp()) * 1000
-
-#         sp = spotipy.Spotify(   auth_manager=SpotifyOAuth(client_id=self.CLIENT_ID,
-#                                 client_secret=self.CLIENT_SEC,
-#                                 redirect_uri='http://localhost:3000/callback',
-#                                 scope=scope)
-#                             )
-
-#         return sp.current_user_recently_played(limit=40)
-    
-#     # Extract Method
-#     def extract(self):
-#         data = self.get_data()
-
-#         # Values inside of Pandas Dataframe
-#         song_names = []
-#         artist_names = []
-#         played_at = []
-#         popularity = []
-
-#         for song in data['items']:
-#             song_names.append(song['track']['name'])
-#             artist_names.append(song['track']['album']['artists'][0]['name'])
-#             played_at.append(song['played_at'])
-#             popularity.append(song['track']['popularity'])
-
-#         song_dict = {
-#                         'song_names': song_names,
-#                         'artist_names': artist_names,
-#                         'played_at': played_at,
-#                         'popularity': popularity
-#                     }
-
-#         song_df = pd.DataFrame(song_dict,columns = ['song_names','artist_names','played_at','popularity'])
-
-#         print(song_df)
-
-#         return song_df
-
-#     def pop_check(self, pop_number):
-#         if pop_number > 50:
-#             return 'High'
-#         else:
-#             return 'Low'
-    
-#     # Transform Method
-#     def transform(self):
-#         df = self.extract()
-
-#         # Check if df is empty
-#         if df.empty:
-#             print('No Songs Downloaded. Finishing Execution')
-#             return False
-        
-#         # Primary Key Check
-#         if pd.Series(df['played_at']).is_unique:
-#             pass
-#         else:
-#             raise Exception(f'[Transform Error]: Primary Key Check is not valid')
-        
-#         if df.isnull().values.any():
-#             raise Exception('No real Values Found')
-
-#         # Adding Transformation Column - Pop range Column
-#         df['pop_range'] = df['popularity'].apply(self.pop_check)
-
-#         print(df)
-#         return df
-
-#     def load(self):
-#         df = self.transform()
-#         connection = 'postgresql://postgres:twdiplapo22@127.0.0.1:5432/90_day_song_data'
-
-#         df.to_sql('recent_artist_popularity', index=False, con = connection, if_exists = 'append',
-#         schema = 'public', chunksize = 500, dtype={
-#                                                     'song_name': Text,
-#                                                     'artist_names': Text,
-#                                                     'played_at': DateTime,
-#                                                     'popularity': Integer,
-#                                                     'pop_range': Text
-#                                                 })
-
-#         return df
-
-
-etl = Pandas_ETL()
-
-# etl.load()
