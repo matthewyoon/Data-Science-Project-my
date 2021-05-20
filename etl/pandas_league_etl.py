@@ -16,7 +16,7 @@ class Pandas_ETL():
 
     # Initialize self variables that can be used within the class. ie. API-Key, riotwatcher wrapper, region and the season
     def __init__(self):
-        self.API_KEY='RGAPI-beefeee6-bcef-480e-bcdc-12d3a372ece0'
+        self.API_KEY='API KEY HERE'
         self.lol_watcher = LolWatcher(self.API_KEY)
         self.my_region = 'na1'
         self.season = 13
@@ -85,10 +85,12 @@ class Pandas_ETL():
         stats_df = self.get_stats(match_id)
         name_df = self.get_summonerName(match_id)
         match_ranks_df = self.get_summonerRanks(name_df)
+        print('\n', f"This is our dataframe of only the ranks of the people within the inputted username's recent matches \n {match_ranks_df}")
         temp_df = name_df.join(stats_df)
+        
         # Will want to specify which columns I want 
         extracted_df = temp_df[['player.summonerName','player.summonerId','kills','deaths','assists','totalDamageDealtToChampions','visionScore','totalMinionsKilled']].copy()
-
+        print('\n', f"This is our dataframe of only the columns that we want from our extracted dataframe \n {extracted_df}")
         return extracted_df, match_ranks_df
 
     # This method is to calculate the actual kill/death ratio
@@ -107,11 +109,11 @@ class Pandas_ETL():
         
         extracted_df = extracted_df.where(pd.notnull(extracted_df), None)
         # print(extracted_df)
-        extracted_df = extracted_df.groupby(['player.summonerName'], as_index=False)[['kills','deaths','assists','totalDamageDealtToChampions','visionScore','totalMinionsKilled']].mean().round(2)
+        extracted_df = extracted_df.groupby(['player.summonerName'], as_index=False, sort=False)[['kills','deaths','assists','totalDamageDealtToChampions','visionScore','totalMinionsKilled']].mean().round(2)
         extracted_df = extracted_df.join(match_ranks_df, how='left')
-        print(f"this is the dataframe with the ranks \n {extracted_df}") 
-        extracted_df_username = extracted_df.loc[extracted_df['player.summonerName']==username].copy()
-        print(f"this is the dataframe with only the username \n {extracted_df_username}")
+        print(f"\n This is the dataframe with the ranks \n {extracted_df}") 
+        extracted_df_username = extracted_df.loc[extracted_df['player.summonerName']==username].copy() # Find the row where the username matches the input and set that equal to our final df
+        print(f"\n This is the dataframe with only the username \n {extracted_df_username}")
 
         # Check if df is empty
         if extracted_df.empty:
@@ -128,11 +130,10 @@ class Pandas_ETL():
         if extracted_df.isnull().values.any():
             raise Exception('No real Values Found')
 
-        # Adding Transformation Column - Pop range Column
+        # Adding Transformation Column - kda ratio column. calculated from the means we got from the column before and our kda method
         extracted_df_username['kill/death/assist ratio'] = extracted_df_username.apply(self.kda, axis=1)
         extracted_df_username['numMatchesInputted'] = num_matches
 
-        print(extracted_df_username.sort_values(['kill/death/assist ratio'], ascending=False))
         return extracted_df_username
 
     def load(self, username, num_matches): # similar to the other methods - will take in 2 params
@@ -158,7 +159,4 @@ class Pandas_ETL():
 
 etl=Pandas_ETL()
 # final_df = etl.load('rickyyytan',5)
-etl.load('Doublelift', 4)
-
-#argparse
-
+etl.load('Cody Sun', 5)
