@@ -84,13 +84,12 @@ class Pandas_ETL():
         match_id = self.get_match_id(summoner_df, num_matches)
         stats_df = self.get_stats(match_id)
         name_df = self.get_summonerName(match_id)
-        # match_ranks_df = self.get_summonerRanks(name_df)
-        # name_df = name_df.join(match_ranks_df)
+        match_ranks_df = self.get_summonerRanks(name_df)
         temp_df = name_df.join(stats_df)
         # Will want to specify which columns I want 
         extracted_df = temp_df[['player.summonerName','player.summonerId','kills','deaths','assists','totalDamageDealtToChampions','visionScore','totalMinionsKilled']].copy()
 
-        return extracted_df
+        return extracted_df, match_ranks_df
 
     # This method is to calculate the actual kill/death ratio
     # Could have used a lambda function, but this method makes the purpose a little more clear imo.
@@ -103,13 +102,16 @@ class Pandas_ETL():
     # This transformation will have the data from the number of matches the user inputs and add that to the database as a dataframe.
     # In this example, user "Doublelift"'s most recent 5 matches will be taken into account.
     def transform(self, username, num_matches):
-        extracted_df = self.extract(username, num_matches)
+        extracted_df, match_ranks_df = self.extract(username, num_matches)
+        # name_df = name_df.join(match_ranks_df, how='left')
+        
         extracted_df = extracted_df.where(pd.notnull(extracted_df), None)
         # print(extracted_df)
         extracted_df = extracted_df.groupby(['player.summonerName'], as_index=False)[['kills','deaths','assists','totalDamageDealtToChampions','visionScore','totalMinionsKilled']].mean().round(2)
+        extracted_df = extracted_df.join(match_ranks_df, how='left')
+        print(f"this is the dataframe with the ranks \n {extracted_df}") 
         extracted_df_username = extracted_df.loc[extracted_df['player.summonerName']==username].copy()
-        print(extracted_df_username)
-        
+        print(f"this is the dataframe with only the username \n {extracted_df_username}")
 
         # Check if df is empty
         if extracted_df.empty:
@@ -137,22 +139,26 @@ class Pandas_ETL():
         df = self.transform(username, num_matches)
         connection = 'postgresql://postgres:twdiplapo22@127.0.0.1:5432/recent_matches_kda_data'
 
-        df.to_sql('recent_artist_popularity', index=False, con = connection, if_exists = 'append',
+        df.to_sql('player_average_stats_and_rank', index=False, con = connection, if_exists = 'append',
         schema = 'public', chunksize = 500, dtype={
-                                                    'player.summonerName': Text,
+                                                    'summoner_name': Text,
                                                     'kills': Float,
                                                     'deaths': Float,
                                                     'assists': Float,
-                                                    'totalDamageDealtToChampions': Float,
-                                                    'visionScore': Float,
-                                                    'totalMinionsKilled': Float,
-                                                    'numMatchesInputted': Integer
+                                                    'total_damage_dealt_to_champions': Float,
+                                                    'vision_score': Float,
+                                                    'total_minions_killed': Float,
+                                                    'tier': Text,
+                                                    'rank': Text,
+                                                    'kill_death_assist_ratio': Float,
+                                                    'num_matches_inputted': Integer
                                                 })
 
         return df
 
 etl=Pandas_ETL()
-final_df = etl.load('rickyyytan',5)
+# final_df = etl.load('rickyyytan',5)
+etl.load('Doublelift', 4)
 
 #argparse
 
