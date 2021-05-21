@@ -105,13 +105,12 @@ class Pandas_ETL():
     # In this example, user "Doublelift"'s most recent 5 matches will be taken into account.
     def transform(self, username, num_matches):
         extracted_df, match_ranks_df = self.extract(username, num_matches)
-        # name_df = name_df.join(match_ranks_df, how='left')
         
         extracted_df = extracted_df.where(pd.notnull(extracted_df), None)
         # print(extracted_df)
         extracted_df = extracted_df.groupby(['player.summonerName'], as_index=False, sort=False)[['kills','deaths','assists','totalDamageDealtToChampions','visionScore','totalMinionsKilled']].mean().round(2)
         extracted_df = extracted_df.join(match_ranks_df, how='left')
-        print(f"\n This is the dataframe with the ranks \n {extracted_df}") 
+        print(f"\n This is the averaged stats dataframe with the ranks \n {extracted_df}") 
         extracted_df_username = extracted_df.loc[extracted_df['player.summonerName']==username].copy() # Find the row where the username matches the input and set that equal to our final df
         print(f"\n This is the dataframe with only the username \n {extracted_df_username}")
 
@@ -159,4 +158,4 @@ class Pandas_ETL():
 
 etl=Pandas_ETL()
 # final_df = etl.load('rickyyytan',5)
-etl.load('Cody Sun', 5)
+etl.load('womengineer', 5)
